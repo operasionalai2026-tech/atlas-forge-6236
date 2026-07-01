@@ -1,7 +1,8 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import Logo from "@/app/components/Logo";
 
 const TABLES = {
   orders:          { label: "Orders",        cols: ["salesorder_no","source_name","store_name","grand_total","escrow_amount","status","transaction_date"] },
@@ -38,6 +39,8 @@ export default function Dashboard({ email }) {
   const [rows, setRows] = useState([]);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
+  const [sync, setSync] = useState({ state: "idle", msg: "" }); // idle|running|done|error
+  const pollRef = useRef(null);
 
   const loadStats = useCallback(async () => {
     const out = {};
@@ -71,6 +74,52 @@ export default function Dashboard({ email }) {
     router.refresh();
   }
 
+  // ── Sync manual (memicu GitHub Actions di cloud) ──
+  function pollSync() {
+    let tries = 0;
+    clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      tries++;
+      try {
+        const d = await (await fetch("/api/sync", { cache: "no-store" })).json();
+        if (d.status === "completed") {
+          clearInterval(pollRef.current);
+          const ok = d.conclusion === "success";
+          setSync({ state: ok ? "done" : "error", msg: ok ? "Sync selesai ✓" : "Sync gagal" });
+          loadStats();
+          loadTable(cur);
+        } else if (d.status) {
+          setSync({ state: "running", msg: "Sync berjalan di cloud… (" + d.status + ")" });
+        }
+      } catch {
+        /* abaikan error polling sesaat */
+      }
+      if (tries > 80) clearInterval(pollRef.current); // stop ~6-7 mnt
+    }, 5000);
+  }
+
+  async function runSync(mode, label) {
+    setSync({ state: "running", msg: "Memulai " + label + "…" });
+    try {
+      const r = await fetch("/api/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        setSync({ state: "error", msg: "Gagal: " + (e.error || r.status) });
+        return;
+      }
+      setSync({ state: "running", msg: label + " berjalan di cloud…" });
+      setTimeout(pollSync, 4000); // beri jeda agar run terdaftar dulu
+    } catch (e) {
+      setSync({ state: "error", msg: "Gagal: " + e.message });
+    }
+  }
+
+  useEffect(() => () => clearInterval(pollRef.current), []);
+
   const cols = TABLES[cur].cols;
   const shown = !q
     ? rows
@@ -81,15 +130,43 @@ export default function Dashboard({ email }) {
   return (
     <div className="wrap">
       <header className="hdr">
-        <div>
-          <h1>📊 BVR-DB Dashboard</h1>
-          <p>Integrasi Jubelio → Supabase · data real-time</p>
+        <div className="brand">
+          <Logo size={44} />
+          <div>
+            <h1>Beverra Central</h1>
+            <p>Integrasi Jubelio → Supabase · auto-sync tiap 30 menit</p>
+          </div>
         </div>
         <div className="user">
           <div>👤 {email}</div>
           <button className="btn-out" onClick={logout}>Keluar</button>
         </div>
       </header>
+
+      <div className="synccard">
+        <div className="sync-left">
+          <b>🔄 Sync Manual</b>
+          <span className={"sync-status s-" + sync.state}>
+            {sync.state === "idle" ? "Otomatis tiap 30 menit" : sync.msg}
+          </span>
+        </div>
+        <div className="sync-btns">
+          <button
+            className="btn-sync fast"
+            disabled={sync.state === "running"}
+            onClick={() => runSync("--orders --stock-only", "Sync cepat")}
+          >
+            ⚡ Sync Cepat
+          </button>
+          <button
+            className="btn-sync full"
+            disabled={sync.state === "running"}
+            onClick={() => runSync("--all --report-stock --report-trend", "Sync penuh")}
+          >
+            ✨ Sync Penuh
+          </button>
+        </div>
+      </div>
 
       <div className="stats">
         {STAT_TABLES.map((t, i) => (

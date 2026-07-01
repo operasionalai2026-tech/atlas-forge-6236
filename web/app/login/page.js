@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import Logo from "@/app/components/Logo";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -28,8 +29,8 @@ export default function LoginPage() {
   return (
     <div className="login-wrap">
       <div className="login-card">
-        <div className="login-logo">📊</div>
-        <h1>BVR-DB Dashboard</h1>
+        <div className="login-logo"><Logo size={38} /></div>
+        <h1>Beverra Central</h1>
         <p className="sub">Masuk untuk melihat data</p>
         <form onSubmit={handleLogin}>
           {error && <div className="err">⚠️ {error}</div>}

@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "BVR-DB Dashboard",
-  description: "Integrasi Jubelio → Supabase",
+  title: "Beverra Central",
+  description: "Beverra Central — integrasi Jubelio → Supabase",
 };
 
 export default function RootLayout({ children }) {
