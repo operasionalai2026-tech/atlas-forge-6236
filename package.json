@@ -1,0 +1,13 @@
+{
+  "name": "bvr-db-notify",
+  "version": "1.0.0",
+  "description": "Notifikasi WhatsApp via Fonnte (Node.js) untuk sistem sync Jubelio -> Supabase",
+  "private": true,
+  "main": "notify.js",
+  "bin": { "bvr-notify": "notify.js" },
+  "scripts": {
+    "notify": "node notify.js",
+    "test-notify": "node notify.js \"Tes notifikasi BVR-DB\""
+  },
+  "engines": { "node": ">=18" }
+}

@@ -1,0 +1,56 @@
+name: BVR Sync Jubelio → Supabase
+
+# Sync terjadwal di cloud (gratis) — tidak butuh PC nyala.
+# Secrets diisi di: GitHub repo → Settings → Secrets and variables → Actions.
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # tiap 30 mnt  → order + alert tren
+    - cron: '0 */2 * * *'    # tiap 2 jam   → HPP + stok (cepat)
+    - cron: '0 20 * * *'     # 03:00 WIB    → master produk lengkap + alert stok + preorder
+  workflow_dispatch:          # tombol "Run workflow" manual di tab Actions
+    inputs:
+      mode:
+        description: 'Argumen run_sync (mis. --all, --orders, --products)'
+        default: '--orders'
+
+concurrency:
+  group: bvr-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Tentukan mode dari jadwal
+        id: mode
+        run: |
+          case "${{ github.event.schedule }}" in
+            "*/30 * * * *") echo "args=--orders --report-trend" >> $GITHUB_OUTPUT ;;
+            "0 */2 * * *")  echo "args=--stock-only" >> $GITHUB_OUTPUT ;;
+            "0 20 * * *")   echo "args=--products --preorder --report-stock" >> $GITHUB_OUTPUT ;;
+            *)              echo "args=${{ github.event.inputs.mode || '--orders' }}" >> $GITHUB_OUTPUT ;;
+          esac
+
+      - name: Jalankan sync
+        env:
+          EMAIL_JUBELIO:              ${{ secrets.EMAIL_JUBELIO }}
+          PASSWORD_JUBELIO:           ${{ secrets.PASSWORD_JUBELIO }}
+          SUPABASE_URL:               ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY:  ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FONNTE_TOKEN:               ${{ secrets.FONNTE_TOKEN }}
+          FONNTE_TARGET:              ${{ secrets.FONNTE_TARGET }}
+        run: python run_sync.py ${{ steps.mode.outputs.args }}
