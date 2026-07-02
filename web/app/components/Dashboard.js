@@ -41,33 +41,62 @@ const TABLES = {
   },
 };
 
+// label kolom bahasa manusia (fallback ke nama asli)
+const LABELS = {
+  salesorder_no: "No Order", source_name: "Channel", store_name: "Toko",
+  grand_total: "Total", escrow_amount: "Settlement", status: "Status",
+  transaction_date: "Tanggal", item_code: "SKU", item_name: "Nama Produk",
+  last_cogs: "HPP", total_available: "Stok", weight_gram: "Berat (g)",
+  item_group_name: "Kategori", brand_name: "Brand", variant: "Varian",
+  qty: "Qty", price: "Harga", disc_amount: "Diskon", amount: "Subtotal",
+  location_code: "Gudang", location_name: "Gudang", on_hand: "Fisik",
+  available: "Tersedia", on_order: "On Order", reserved: "Reserved",
+  purchaseorder_no: "No PO", qty_po: "Qty PO", qty_fulfilled: "Diterima",
+  qty_pending: "Pending", module: "Modul", records_processed: "Diproses",
+  records_failed: "Gagal", started_at: "Mulai", finished_at: "Selesai",
+  error_message: "Keterangan", run_id: "Run ID",
+};
+// kolom bernilai uang → format Rupiah
+const MONEY = new Set(["grand_total", "escrow_amount", "last_cogs", "price", "disc_amount", "amount"]);
+
 // ambil nilai kolom (dukung path bertitik utk relasi embed)
 function getVal(row, path) {
   return path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), row);
 }
-// label header: segmen terakhir dari path
-function colLabel(path) {
+// key kolom = segmen terakhir dari path; label = versi rapih
+function colKey(path) {
   const p = path.split(".");
   return p[p.length - 1];
+}
+function colLabel(path) {
+  const k = colKey(path);
+  return LABELS[k] || k;
 }
 
 const STAT_TABLES = ["orders", "order_items", "products", "product_stocks", "preorder_stocks", "sync_log"];
 const STAT_LABEL = { orders: "Orders", order_items: "Order Items", products: "Products", product_stocks: "Stok Gudang", preorder_stocks: "Preorder", sync_log: "Sync Log" };
+const STAT_ICON = { orders: "🧾", order_items: "📦", products: "🎁", product_stocks: "🏬", preorder_stocks: "🚚", sync_log: "📜" };
 
-function fmtCell(col, val) {
-  if (val === null || val === undefined) return <span className="cnull">—</span>;
-  if (col === "status") {
+function rupiah(n) {
+  return "Rp" + Number(n).toLocaleString("id-ID");
+}
+
+function fmtCell(key, val) {
+  if (val === null || val === undefined || val === "") return <span className="cnull">—</span>;
+  if (key === "status") {
     const v = String(val).toUpperCase();
     let c = "b-pending";
     if (v.includes("COMPLET") || v.includes("SUCCESS") || v === "OK") c = "b-ok";
     else if (v.includes("CANCEL") || v.includes("BATAL") || v.includes("FAIL")) c = "b-cancel";
     return <span className={"badge " + c}>{val}</span>;
   }
-  if (col === "error_message")
+  if (key === "error_message")
     return <span className="errmsg" title={String(val)}>{String(val)}</span>;
+  if (MONEY.has(key) && typeof val === "number")
+    return <span className="cnum">{rupiah(val)}</span>;
   if (typeof val === "number") return <span className="cnum">{val.toLocaleString("id-ID")}</span>;
   if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}T/.test(val))
-    return new Date(val).toLocaleString("id-ID");
+    return <span className="cdate">{new Date(val).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })}</span>;
   return String(val);
 }
 
@@ -80,6 +109,7 @@ export default function Dashboard({ email }) {
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
   const [sync, setSync] = useState({ state: "idle", msg: "" }); // idle|running|done|error
+  const [lastSync, setLastSync] = useState(null);
   const pollRef = useRef(null);
 
   const loadStats = useCallback(async () => {
@@ -89,6 +119,12 @@ export default function Dashboard({ email }) {
       out[t] = count;
     }
     setStats(out);
+    const { data } = await supabase
+      .from("sync_log")
+      .select("module,status,finished_at,records_processed")
+      .order("started_at", { ascending: false })
+      .limit(1);
+    setLastSync(data && data[0] ? data[0] : null);
   }, [supabase]);
 
   const loadTable = useCallback(async (t) => {
@@ -188,7 +224,15 @@ export default function Dashboard({ email }) {
         <div className="sync-left">
           <b>🔄 Sync Manual</b>
           <span className={"sync-status s-" + sync.state}>
-            {sync.state === "idle" ? "Otomatis tiap 30 menit" : sync.msg}
+            {sync.state !== "idle"
+              ? sync.msg
+              : lastSync
+              ? `Terakhir: ${lastSync.module} · ${lastSync.status} · ${
+                  lastSync.finished_at
+                    ? new Date(lastSync.finished_at).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })
+                    : "—"
+                }`
+              : "Otomatis tiap 30 menit"}
           </span>
         </div>
         <div className="sync-btns">
@@ -216,6 +260,7 @@ export default function Dashboard({ email }) {
             <div className="num">
               {stats[t] == null ? "…" : Number(stats[t]).toLocaleString("id-ID")}
             </div>
+            <div className="stat-ic">{STAT_ICON[t]}</div>
           </div>
         ))}
       </div>
@@ -257,7 +302,7 @@ export default function Dashboard({ email }) {
               <tbody>
                 {shown.map((r, i) => (
                   <tr key={i}>
-                    {cols.map((c) => <td key={c}>{fmtCell(colLabel(c), getVal(r, c))}</td>)}
+                    {cols.map((c) => <td key={c}>{fmtCell(colKey(c), getVal(r, c))}</td>)}
                   </tr>
                 ))}
               </tbody>

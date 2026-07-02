@@ -41,6 +41,7 @@ body { font-family: "Segoe UI", system-ui, -apple-system, sans-serif; background
 .stat.pink::before { background: var(--pink); }
 .stat .label { font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
 .stat .num { font-size: 28px; font-weight: 800; margin-top: 6px; }
+.stat-ic { position: absolute; right: 14px; top: 14px; font-size: 22px; opacity: .35; }
 
 /* viewer */
 .viewer { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 22px; box-shadow: var(--shadow); }
@@ -62,7 +63,8 @@ tbody td { padding: 9px 12px; border-bottom: 1px solid #f1f5f9; white-space: now
 tbody tr:nth-child(even) { background: #fafbff; }
 tbody tr:hover { background: var(--pink-soft); }
 .cnum { color: var(--blue); font-weight: 600; }
-.cnull { color: #cbd5e1; font-style: italic; }
+.cdate { color: var(--muted); font-size: 12px; }
+.cnull { color: #cbd5e1; }
 .badge { padding: 3px 9px; border-radius: 6px; font-size: 11px; font-weight: 700; }
 .b-ok { background: #ecfdf5; color: #047857; }
 .b-cancel { background: #fef2f2; color: #b91c1c; }
