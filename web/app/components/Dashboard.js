@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import Logo from "@/app/components/Logo";
 
@@ -215,7 +216,11 @@ export default function Dashboard({ email }) {
           </div>
         </div>
         <div className="user">
-          <div>👤 {email}</div>
+          <div className="nav">
+            <span className="navlink active">📊 Data</span>
+            <Link href="/analytics" className="navlink">📈 Analitik</Link>
+          </div>
+          <div style={{ fontSize: 12, opacity: 0.9 }}>👤 {email}</div>
           <button className="btn-out" onClick={logout}>Keluar</button>
         </div>
       </header>
