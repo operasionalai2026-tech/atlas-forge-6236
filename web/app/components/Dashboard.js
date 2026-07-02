@@ -4,27 +4,67 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import Logo from "@/app/components/Logo";
 
+// select = query PostgREST (boleh embed relasi), cols = kolom yang ditampilkan
+// (boleh path bertitik utk relasi, mis. "products.item_code"), order = urutan.
 const TABLES = {
-  orders:          { label: "Orders",        cols: ["salesorder_no","source_name","store_name","grand_total","escrow_amount","status","transaction_date"] },
-  products:        { label: "Products",      cols: ["item_code","item_name","last_cogs","total_available","weight_gram","item_group_name","brand_name"] },
-  order_items:     { label: "Order Items",   cols: ["salesorder_no","item_code","item_name","variant","qty","price","disc_amount","amount"] },
-  product_stocks:  { label: "Stok/Gudang",   cols: ["item_id","location_id","location_code","on_hand","available","reserved"] },
-  preorder_stocks: { label: "Preorder (PO)", cols: ["purchaseorder_no","item_code","item_name","qty_po","qty_fulfilled","qty_pending","location_name"] },
-  sync_log:        { label: "Sync Log",      cols: ["run_id","module","status","records_processed","records_failed","finished_at"] },
+  orders: {
+    label: "Orders",
+    select: "salesorder_no,source_name,store_name,grand_total,escrow_amount,status,transaction_date",
+    cols: ["salesorder_no","source_name","store_name","grand_total","escrow_amount","status","transaction_date"],
+    order: "transaction_date.desc",
+  },
+  products: {
+    label: "Products",
+    select: "item_code,item_name,last_cogs,total_available,weight_gram,item_group_name,brand_name",
+    cols: ["item_code","item_name","last_cogs","total_available","weight_gram","item_group_name","brand_name"],
+  },
+  order_items: {
+    label: "Order Items",
+    select: "salesorder_no,item_code,item_name,variant,qty,price,disc_amount,amount",
+    cols: ["salesorder_no","item_code","item_name","variant","qty","price","disc_amount","amount"],
+  },
+  product_stocks: {
+    label: "Stok/Gudang",
+    select: "item_id,location_id,location_code,on_hand,on_order,reserved,available,products(item_code,item_name)",
+    cols: ["products.item_code","products.item_name","location_code","on_hand","available","on_order","reserved"],
+  },
+  preorder_stocks: {
+    label: "Preorder (PO)",
+    select: "purchaseorder_no,item_code,item_name,qty_po,qty_fulfilled,qty_pending,location_name",
+    cols: ["purchaseorder_no","item_code","item_name","qty_po","qty_fulfilled","qty_pending","location_name"],
+  },
+  sync_log: {
+    label: "Sync Log",
+    select: "run_id,module,status,records_processed,records_failed,started_at,finished_at,error_message",
+    cols: ["module","status","records_processed","records_failed","started_at","finished_at","error_message"],
+    order: "started_at.desc",
+  },
 };
+
+// ambil nilai kolom (dukung path bertitik utk relasi embed)
+function getVal(row, path) {
+  return path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), row);
+}
+// label header: segmen terakhir dari path
+function colLabel(path) {
+  const p = path.split(".");
+  return p[p.length - 1];
+}
 
 const STAT_TABLES = ["orders", "order_items", "products", "product_stocks", "preorder_stocks", "sync_log"];
 const STAT_LABEL = { orders: "Orders", order_items: "Order Items", products: "Products", product_stocks: "Stok Gudang", preorder_stocks: "Preorder", sync_log: "Sync Log" };
 
 function fmtCell(col, val) {
-  if (val === null || val === undefined) return <span className="cnull">NULL</span>;
+  if (val === null || val === undefined) return <span className="cnull">—</span>;
   if (col === "status") {
     const v = String(val).toUpperCase();
     let c = "b-pending";
-    if (v.includes("COMPLET") || v === "OK") c = "b-ok";
-    else if (v.includes("CANCEL") || v.includes("BATAL")) c = "b-cancel";
+    if (v.includes("COMPLET") || v.includes("SUCCESS") || v === "OK") c = "b-ok";
+    else if (v.includes("CANCEL") || v.includes("BATAL") || v.includes("FAIL")) c = "b-cancel";
     return <span className={"badge " + c}>{val}</span>;
   }
+  if (col === "error_message")
+    return <span className="errmsg" title={String(val)}>{String(val)}</span>;
   if (typeof val === "number") return <span className="cnum">{val.toLocaleString("id-ID")}</span>;
   if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}T/.test(val))
     return new Date(val).toLocaleString("id-ID");
@@ -53,10 +93,13 @@ export default function Dashboard({ email }) {
 
   const loadTable = useCallback(async (t) => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from(t)
-      .select(TABLES[t].cols.join(","))
-      .limit(200);
+    const cfg = TABLES[t];
+    let query = supabase.from(t).select(cfg.select);
+    if (cfg.order) {
+      const [col, dir] = cfg.order.split(".");
+      query = query.order(col, { ascending: dir !== "desc", nullsFirst: false });
+    }
+    const { data, error } = await query.limit(500);
     setRows(error ? [] : data || []);
     setLoading(false);
   }, [supabase]);
@@ -123,9 +166,7 @@ export default function Dashboard({ email }) {
   const cols = TABLES[cur].cols;
   const shown = !q
     ? rows
-    : rows.filter((r) =>
-        Object.values(r).some((v) => String(v).toLowerCase().includes(q.toLowerCase()))
-      );
+    : rows.filter((r) => JSON.stringify(r).toLowerCase().includes(q.toLowerCase()));
 
   return (
     <div className="wrap">
@@ -211,12 +252,12 @@ export default function Dashboard({ email }) {
           ) : (
             <table>
               <thead>
-                <tr>{cols.map((c) => <th key={c}>{c}</th>)}</tr>
+                <tr>{cols.map((c) => <th key={c}>{colLabel(c)}</th>)}</tr>
               </thead>
               <tbody>
                 {shown.map((r, i) => (
                   <tr key={i}>
-                    {cols.map((c) => <td key={c}>{fmtCell(c, r[c])}</td>)}
+                    {cols.map((c) => <td key={c}>{fmtCell(colLabel(c), getVal(r, c))}</td>)}
                   </tr>
                 ))}
               </tbody>

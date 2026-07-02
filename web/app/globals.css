@@ -67,6 +67,7 @@ tbody tr:hover { background: var(--pink-soft); }
 .b-ok { background: #ecfdf5; color: #047857; }
 .b-cancel { background: #fef2f2; color: #b91c1c; }
 .b-pending { background: #fff7ed; color: #c2680c; }
+.errmsg { color: var(--red); font-size: 12px; }
 .loading { text-align: center; padding: 40px; color: var(--muted); }
 
 /* login */
