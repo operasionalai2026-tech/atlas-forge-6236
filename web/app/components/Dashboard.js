@@ -271,7 +271,7 @@ export default function Dashboard({ email }) {
           <div className={"stat" + (i % 2 ? " pink" : "")} key={t}>
             <div className="label">{STAT_LABEL[t]}</div>
             <div className="num">
-              {stats[t] == null ? "…" : Number(stats[t]).toLocaleString("id-ID")}
+              {stats[t] == null ? <span className="skel" /> : Number(stats[t]).toLocaleString("id-ID")}
             </div>
             <div className="stat-ic">{STAT_ICON[t]}</div>
           </div>

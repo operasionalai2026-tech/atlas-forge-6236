@@ -93,7 +93,9 @@ export default function Analytics({ email }) {
       )}
 
       {!d ? (
-        <div className="loading" style={{ background: "#fff", borderRadius: 16 }}>Memuat analitik…</div>
+        <div className="loading" style={{ background: "#fff", borderRadius: 16 }}>
+          <span className="spinner" />Memuat analitik…
+        </div>
       ) : (
         <>
           {/* KPI */}

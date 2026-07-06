@@ -6,6 +6,12 @@
       "runtimeExecutable": "C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
       "runtimeArgs": ["dashboard_qr08lt.py"],
       "port": 5000
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "C:\\Program Files\\nodejs\\npm.cmd",
+      "runtimeArgs": ["--prefix", "web", "run", "dev"],
+      "port": 3000
     }
   ]
 }
