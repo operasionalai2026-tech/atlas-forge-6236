@@ -41,10 +41,16 @@ BUNDLE_FILTER     = _int("BUNDLE_FILTER", 1)
 SUPABASE_URL = _get("SUPABASE_URL")           # https://xxxx.supabase.co
 SUPABASE_KEY = _get("SUPABASE_SERVICE_ROLE_KEY") or _get("SUPABASE_KEY")  # service_role disarankan
 
-# ── Fonnte (WhatsApp) ───────────────────────────────────────────────────────
+# ── Fonnte (WhatsApp — jalur fallback via API pihak ketiga) ────────────────
 FONNTE_TOKEN  = _get("FONNTE_TOKEN")
 FONNTE_TARGET = _get("FONNTE_TARGET")         # nomor tujuan, cth 6281xxxx (boleh koma utk banyak)
 FONNTE_URL    = _get("FONNTE_URL", "https://api.fonnte.com/send")
+
+# ── WhatsApp lokal (Baileys, daemon di whatsapp/bot.js — HANYA jalan di PC) ─
+# Dicoba LEBIH DULU sebelum Fonnte. Kosongkan WA_GROUP_ID untuk skip jalur ini
+# (mis. saat sync jalan di GitHub Actions, di mana daemon lokal tidak terjangkau).
+WA_LOCAL_URL = _get("WA_LOCAL_URL", "http://127.0.0.1:4001")
+WA_GROUP_ID  = _get("WA_GROUP_ID")            # cth: 120363xxxxxxxxxx@g.us (lihat /groups)
 
 # ── Perilaku sync ───────────────────────────────────────────────────────────
 # Berapa hari ke belakang (berdasarkan last_modified) yang di-scan saat incremental.
