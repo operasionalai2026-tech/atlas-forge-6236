@@ -65,9 +65,12 @@ TREND_CHANNELS   = [c.strip().upper() for c in
                     (_get("TREND_CHANNELS", "SHOPEE,TIKTOK") or "").split(",") if c.strip()]
 
 PAGE_SIZE           = _int("JUBELIO_PAGE_SIZE", 100)
-REQUEST_DELAY_MS    = _int("REQUEST_DELAY_MS", 350)   # jeda antar request (hindari 429)
+REQUEST_DELAY_MS    = _int("REQUEST_DELAY_MS", 350)   # jeda AWAL antar request (adaptif)
+REQUEST_DELAY_MIN_MS = _int("REQUEST_DELAY_MIN_MS", 150)   # batas bawah saat lancar
+REQUEST_DELAY_MAX_MS = _int("REQUEST_DELAY_MAX_MS", 3000)  # batas atas saat sering 429
 MAX_RETRIES         = _int("MAX_RETRIES", 5)
-UPSERT_BATCH        = _int("UPSERT_BATCH", 200)       # baris per batch ke Supabase
+UPSERT_BATCH        = _int("UPSERT_BATCH", 500)       # baris per batch ke Supabase
+DETAIL_FLUSH        = _int("DETAIL_FLUSH", 50)        # order per flush batch ke Supabase
 
 LOG_DIR = os.path.join(_HERE, "logs")
 

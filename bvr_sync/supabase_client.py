@@ -1,15 +1,19 @@
 """Client Supabase via PostgREST (pakai httpx — tanpa dependency tambahan).
 
-Menyediakan upsert (insert-or-update), delete, dan select sederhana.
+Menyediakan upsert (insert-or-update), delete (eq & in), dan select sederhana,
+semuanya dengan retry otomatis untuk error transient (5xx / jaringan).
 Gunakan SERVICE_ROLE key agar bypass RLS.
 """
 from __future__ import annotations
+import time
 import httpx
 from . import config
 from .utils import utcnow_iso
 from .logger import get_logger
 
 log = get_logger()
+
+_TRANSIENT = (429, 500, 502, 503, 504)
 
 
 class SupabaseError(Exception):
@@ -27,15 +31,41 @@ class SupabaseClient:
             "Content-Type": "application/json",
         })
 
+    # ── request dengan retry transient ─────────────────────────────────────────
+    def _request(self, method: str, url: str, **kw) -> httpx.Response:
+        last = None
+        for attempt in range(1, 4):
+            try:
+                resp = self._client.request(method, url, **kw)
+                if resp.status_code in _TRANSIENT:
+                    last = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                    time.sleep(1.5 ** attempt)
+                    continue
+                return resp
+            except httpx.RequestError as e:
+                last = str(e)
+                time.sleep(1.5 ** attempt)
+        raise SupabaseError(f"{method} {url} gagal setelah retry: {last}")
+
     # ── upsert (batch, on_conflict) ────────────────────────────────────────────
     def upsert(self, table: str, rows: list[dict], on_conflict: str) -> int:
         if not rows:
             return 0
+        # DEDUPE by kunci konflik — Postgres tidak boleh punya 2 baris dengan
+        # nilai konflik sama dalam 1 command (error 21000). Ambil yang terakhir
+        # (data paling baru). Wajib karena sumber bisa kirim id kembar (mis.
+        # pagination Jubelio yg di-sort last_modified).
+        keys = [k.strip() for k in on_conflict.split(",")]
+        deduped: dict[tuple, dict] = {}
+        for r in rows:
+            deduped[tuple(r.get(k) for k in keys)] = r
+        rows = list(deduped.values())
+
         total = 0
         for i in range(0, len(rows), config.UPSERT_BATCH):
             batch = rows[i:i + config.UPSERT_BATCH]
-            resp = self._client.post(
-                f"{self._base}/{table}",
+            resp = self._request(
+                "POST", f"{self._base}/{table}",
                 params={"on_conflict": on_conflict},
                 headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
                 json=batch,
@@ -49,20 +79,34 @@ class SupabaseClient:
 
     # ── delete where col op value ─────────────────────────────────────────────
     def delete_eq(self, table: str, column: str, value) -> None:
-        resp = self._client.delete(
-            f"{self._base}/{table}",
+        resp = self._request(
+            "DELETE", f"{self._base}/{table}",
             params={column: f"eq.{value}"},
             headers={"Prefer": "return=minimal"},
         )
         if resp.status_code >= 300:
             raise SupabaseError(f"Delete {table} gagal [{resp.status_code}]: {resp.text[:300]}")
 
+    def delete_in(self, table: str, column: str, values: list) -> None:
+        """Hapus banyak baris sekaligus: WHERE column IN (values) — per 100 nilai."""
+        vals = [v for v in values if v is not None]
+        for i in range(0, len(vals), 100):
+            chunk = ",".join(str(v) for v in vals[i:i + 100])
+            resp = self._request(
+                "DELETE", f"{self._base}/{table}",
+                params={column: f"in.({chunk})"},
+                headers={"Prefer": "return=minimal"},
+            )
+            if resp.status_code >= 300:
+                raise SupabaseError(
+                    f"Delete-in {table} gagal [{resp.status_code}]: {resp.text[:300]}")
+
     # ── select (mis. baca watermark / cek mismatch) ───────────────────────────
     def select(self, table: str, select: str = "*", params: dict | None = None) -> list[dict]:
         q = {"select": select}
         if params:
             q.update(params)
-        resp = self._client.get(f"{self._base}/{table}", params=q)
+        resp = self._request("GET", f"{self._base}/{table}", params=q)
         if resp.status_code >= 300:
             raise SupabaseError(f"Select {table} gagal [{resp.status_code}]: {resp.text[:300]}")
         return resp.json()

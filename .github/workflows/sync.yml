@@ -4,9 +4,13 @@ name: BVR Sync Jubelio → Supabase
 # Secrets diisi di: GitHub repo → Settings → Secrets and variables → Actions.
 on:
   schedule:
-    - cron: '*/30 * * * *'   # tiap 30 mnt  → order + alert tren
-    - cron: '0 */2 * * *'    # tiap 2 jam   → HPP + stok (cepat)
-    - cron: '0 20 * * *'     # 03:00 WIB    → master produk lengkap + alert stok + preorder
+    # Stok + preorder DULUAN & PALING SERING — ini yang dipakai bot WA purchasing
+    # untuk jawab pertanyaan real-time, jadi harus selalu segar.
+    - cron: '*/15 * * * *'   # tiap 15 mnt  → HPP + stok + preorder (real-time)
+    # Sinkron penjualan/order sengaja DIKURANGI ke 1x/hari (malam) — order detail
+    # adalah panggilan API Jubelio paling boros, jadi tidak perlu bolak-balik.
+    - cron: '0 16 * * *'     # 23:00 WIB (malam) → order + retur + alert tren
+    - cron: '0 20 * * *'     # 03:00 WIB    → master produk lengkap + alert stok
   workflow_dispatch:          # tombol "Run workflow" manual di tab Actions
     inputs:
       mode:
@@ -39,9 +43,9 @@ jobs:
         id: mode
         run: |
           case "${{ github.event.schedule }}" in
-            "*/30 * * * *") echo "args=--orders --report-trend" >> $GITHUB_OUTPUT ;;
-            "0 */2 * * *")  echo "args=--stock-only" >> $GITHUB_OUTPUT ;;
-            "0 20 * * *")   echo "args=--products --preorder --report-stock" >> $GITHUB_OUTPUT ;;
+            "*/15 * * * *") echo "args=--stock-only --preorder" >> $GITHUB_OUTPUT ;;
+            "0 16 * * *")   echo "args=--orders --returns --report-trend" >> $GITHUB_OUTPUT ;;
+            "0 20 * * *")   echo "args=--products --report-stock" >> $GITHUB_OUTPUT ;;
             *)              echo "args=${{ github.event.inputs.mode || '--orders' }}" >> $GITHUB_OUTPUT ;;
           esac
 
