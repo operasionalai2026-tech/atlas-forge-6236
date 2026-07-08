@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 // engine Python di cloud). Token GitHub disimpan server-side (GITHUB_SYNC_TOKEN),
 // TIDAK pernah ke browser. Hanya user yang sudah login yang boleh memicu.
 
-const REPO = process.env.GITHUB_REPO || "operasionalai2026-tech/bvr-dashboard";
+const REPO = process.env.GITHUB_REPO || "operasionalai2026-tech/atlas-forge-6236";
 const WORKFLOW = "sync.yml";
 
 async function getUser() {
