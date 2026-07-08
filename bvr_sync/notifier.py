@@ -1,12 +1,19 @@
-"""Notifikasi WhatsApp — pengiriman Fonnte ditangani oleh Node.js (notify.js).
+"""Notifikasi WhatsApp — 2 jalur, dicoba berurutan:
 
-Python hanya menyusun pesan lalu mendelegasikan pengiriman ke `node notify.js`
-(pesan dikirim lewat STDIN agar aman untuk newline/emoji). Aman gagal — tidak
-melempar error ke caller.
+  1. Daemon lokal (Baileys, whatsapp/bot.js) — HANYA terjangkau kalau proses
+     Python ini jalan di PC yang sama dengan daemon (mis. Task Scheduler
+     lokal). Dari GitHub Actions (cloud) jalur ini otomatis gagal-cepat
+     (connection refused dalam <1 detik) lalu lanjut ke Fonnte.
+  2. Fonnte via Node.js (notify.js) — jalan di mana saja (perlu FONNTE_TOKEN).
+
+Aman gagal — tidak melempar error ke caller.
 """
 from __future__ import annotations
+import json
 import os
 import subprocess
+import urllib.error
+import urllib.request
 from . import config
 from .logger import get_logger
 
@@ -17,10 +24,36 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _NOTIFY_JS = os.path.join(_PROJECT_ROOT, "notify.js")
 
 
+def _send_via_local_wa(message: str) -> bool:
+    """Coba kirim lewat daemon whatsapp/bot.js (localhost). Timeout pendek
+    supaya tidak memperlambat sync kalau daemon tidak jalan (mis. di cloud)."""
+    if not config.WA_GROUP_ID:
+        return False
+    try:
+        body = json.dumps({"to": config.WA_GROUP_ID, "message": message}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{config.WA_LOCAL_URL}/send", data=body, method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            ok = resp.status == 200
+            if ok:
+                log.info("Notifikasi terkirim via WhatsApp lokal (Baileys).")
+            return ok
+    except (urllib.error.URLError, TimeoutError, ConnectionRefusedError):
+        return False  # daemon tidak terjangkau — wajar kalau bukan di PC lokal
+    except Exception as e:
+        log.warning(f"WA lokal error tak terduga: {e}")
+        return False
+
+
 def send_whatsapp(message: str) -> bool:
-    """Kirim pesan via notify.js (Node). Return True kalau exit code 0 & terkirim."""
+    """Kirim pesan: coba daemon WA lokal dulu, lalu fallback Fonnte."""
+    if _send_via_local_wa(message):
+        return True
+
     if not config.FONNTE_TOKEN or not config.FONNTE_TARGET:
-        log.info("Fonnte belum dikonfigurasi (FONNTE_TOKEN/FONNTE_TARGET kosong) — notifikasi dilewati.")
+        log.info("WA lokal tidak terjangkau & Fonnte belum dikonfigurasi — notifikasi dilewati.")
         return False
     if not os.path.exists(_NOTIFY_JS):
         log.warning(f"notify.js tidak ditemukan di {_NOTIFY_JS} — notifikasi dilewati.")

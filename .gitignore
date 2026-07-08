@@ -21,6 +21,11 @@ web/.next/
 web/out/
 node_modules/
 
+# WhatsApp (Baileys) — sesi & QR SANGAT rahasia, setara akses penuh WA
+whatsapp/node_modules/
+whatsapp/session/
+whatsapp/qr.png
+
 # Editor / OS
 .DS_Store
 Thumbs.db
