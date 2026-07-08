@@ -1,11 +1,19 @@
 """MODUL 1 — Penjualan (header order + item per SKU).
 
-Strategi incremental:
-  - Order di-sort `last_modified DESC` (perubahan status/return/cancel selalu
-    memperbarui last_modified, jadi order lama yg berubah tetap ke-capture).
-  - Berhenti paging saat menemukan order dengan last_modified < cutoff.
-  - cutoff = watermark_terakhir - overlap, atau (now - lookback_days) utk run pertama.
-  - Upsert header by salesorder_id; item di-refresh (delete lalu insert) per order.
+Strategi incremental (dioptimasi untuk volume besar + anti rate-limit):
+  1. LIGHT PASS  — dari endpoint list (100 order/call) langsung bulk-upsert
+     header ringkas (status, total, channel). Murah: 1 call Jubelio + 1 call
+     Supabase per halaman. Data omzet/status selalu segar walau detail belum.
+  2. SKIP UNCHANGED — order yang last_modified-nya sama dengan yang sudah ada
+     di DB dilewati (tidak fetch detail). Menghemat panggilan detail untuk
+     window overlap yang di-scan ulang tiap run.
+  3. DETAIL BATCH — detail (items + finansial) diambil per order, tapi ditulis
+     ke Supabase secara batch per DETAIL_FLUSH order (bukan 3 call per order).
+
+  - Order di-sort `last_modified DESC`; berhenti paging saat < cutoff.
+  - cutoff = watermark_terakhir - overlap, atau (now - lookback_days).
+  - Catatan: light pass TIDAK menulis last_modified — kolom itu hanya ditulis
+    oleh detail pass, sehingga order yang gagal detail akan dicoba lagi.
 """
 from __future__ import annotations
 import uuid
@@ -102,6 +110,52 @@ def _map_order(d: dict) -> dict:
     }
 
 
+def _map_order_light(d: dict) -> dict:
+    """Header ringkas dari baris LIST (tanpa detail). Kolom yang tak ada di list
+    tidak disertakan → PostgREST tidak menimpanya saat update.
+    PENTING: last_modified sengaja TIDAK ditulis di sini (lihat docstring modul)."""
+    return {
+        "salesorder_id":      to_int(d.get("salesorder_id")),
+        "salesorder_no":      d.get("salesorder_no"),
+        "ref_no":             d.get("ref_no"),
+        "invoice_no":         d.get("invoice_no"),
+        "store_id":           to_int(d.get("store_id")),
+        "store_name":         d.get("store_name"),
+        "source_name":        d.get("source_name") or d.get("channel_name"),
+        "transaction_date":   to_ts(d.get("transaction_date")),
+        "created_date":       to_ts(d.get("created_date")),
+        "status":             d.get("internal_status") or d.get("wms_status"),
+        "channel_status":     d.get("channel_status"),
+        "wms_status":         d.get("wms_status"),
+        "is_paid":            to_bool(d.get("is_paid")),
+        "is_cod":             to_bool(d.get("is_cod")),
+        "is_canceled":        to_bool(d.get("is_canceled")),
+        "cancel_reason":      d.get("cancel_reason"),
+        "customer_name":      d.get("customer_name"),
+        "shipping_full_name": d.get("shipping_full_name"),
+        "courier":            d.get("shipper"),
+        "shipper":            d.get("shipper"),
+        "tracking_number":    d.get("tracking_number"),
+        "grand_total":        to_float(d.get("grand_total")),
+        "note":               d.get("note"),
+        "source_channel":     "jubelio",
+    }
+
+
+def _existing_last_modified(sb: SupabaseClient, ids: list[int]) -> dict[int, datetime]:
+    """last_modified yang sudah tersimpan di DB untuk kumpulan order id."""
+    out: dict[int, datetime] = {}
+    for i in range(0, len(ids), 100):
+        chunk = ",".join(str(x) for x in ids[i:i + 100])
+        rows = sb.select("orders", "salesorder_id,last_modified",
+                         {"salesorder_id": f"in.({chunk})"})
+        for r in rows:
+            dt = _parse_dt(r.get("last_modified"))
+            if dt:
+                out[r["salesorder_id"]] = dt
+    return out
+
+
 def _map_item(d: dict, order_id: int, order_no: str) -> dict:
     return {
         "salesorder_detail_id":   to_int(d.get("salesorder_detail_id")),
@@ -175,6 +229,8 @@ def run(lookback_days: int | None = None,
     log.info(f"[orders][{run_id}] Mulai sync. cutoff last_modified >= {cutoff.isoformat()}")
 
     try:
+        # ── FASE 1: scan list + light bulk upsert ─────────────────────────────
+        candidates: list[tuple[int, datetime | None]] = []   # (so_id, last_modified)
         page = 1
         stop = False
         while not stop:
@@ -183,37 +239,94 @@ def run(lookback_days: int | None = None,
             if not rows:
                 break
 
+            light_batch: list[dict] = []
             for row in rows:
                 lm = _parse_dt(row.get("last_modified"))
                 if lm and lm < cutoff:
                     stop = True
                     break
-
                 so_id = to_int(row.get("salesorder_id"))
                 if so_id is None:
                     continue
-                try:
-                    detail = jub.get_order_detail(so_id)
-                    header = _map_order(detail)
-                    items = [_map_item(it, so_id, header["salesorder_no"])
-                             for it in (detail.get("items") or [])]
+                light_batch.append(_map_order_light(row))
+                candidates.append((so_id, lm))
 
-                    sb.upsert("orders", [header], on_conflict="salesorder_id")
-                    sb.delete_eq("order_items", "order_id", so_id)
-                    if items:
-                        sb.upsert("order_items", items, on_conflict="salesorder_detail_id")
-                        seen_codes.update(i["item_code"] for i in items if i["item_code"])
-
-                    processed += 1
-                    if lm and (max_modified is None or lm > max_modified):
-                        max_modified = lm
-                    if processed % 25 == 0:
-                        log.info(f"[orders][{run_id}] {processed} order tersinkron…")
-                except Exception as e:
-                    failed += 1
-                    log.warning(f"[orders][{run_id}] order {so_id} gagal: {e}")
-
+            if light_batch:
+                sb.upsert("orders", light_batch, on_conflict="salesorder_id")
+            if page % 10 == 0:
+                log.info(f"[orders][{run_id}] Light pass… hal {page}, {len(candidates)} order terkumpul")
             page += 1
+
+        # dedupe kandidat by salesorder_id (pagination bisa balikan id kembar)
+        uniq: dict[int, datetime | None] = {}
+        for sid, lm in candidates:
+            if sid not in uniq or (lm and (uniq[sid] is None or lm > uniq[sid])):
+                uniq[sid] = lm
+        candidates = list(uniq.items())
+        log.info(f"[orders][{run_id}] Light pass selesai: {len(candidates)} order unik dalam window.")
+
+        # ── FASE 2: lewati yang last_modified-nya tak berubah ─────────────────
+        existing = _existing_last_modified(sb, [sid for sid, _ in candidates])
+        todo: list[tuple[int, datetime | None]] = []
+        skipped = 0
+        for sid, lm in candidates:
+            db_lm = existing.get(sid)
+            if lm and db_lm and abs((lm - db_lm).total_seconds()) < 1:
+                skipped += 1                     # sudah sinkron penuh — lewati
+                if max_modified is None or lm > max_modified:
+                    max_modified = lm
+            else:
+                todo.append((sid, lm))
+        if skipped:
+            log.info(f"[orders][{run_id}] {skipped} order tak berubah — dilewati.")
+
+        # ── FASE 3: detail per order, tulis batch per DETAIL_FLUSH ────────────
+        buf_headers: list[dict] = []
+        buf_items: list[dict] = []
+        buf_ids: list[int] = []
+
+        flush_failed = [0]  # pakai list agar bisa dimutasi dari closure
+
+        def _flush():
+            nonlocal buf_headers, buf_items, buf_ids
+            if not buf_headers:
+                return
+            try:
+                sb.upsert("orders", buf_headers, on_conflict="salesorder_id")
+                sb.delete_in("order_items", "order_id", buf_ids)
+                if buf_items:
+                    sb.upsert("order_items", buf_items, on_conflict="salesorder_detail_id")
+            except Exception as e:
+                flush_failed[0] += len(buf_headers)
+                log.warning(f"[orders][{run_id}] flush {len(buf_headers)} order gagal: {e}")
+            finally:
+                # SELALU reset buffer — supaya batch buruk tidak diulang terus
+                buf_headers, buf_items, buf_ids = [], [], []
+
+        for sid, lm in todo:
+            try:
+                detail = jub.get_order_detail(sid)
+                header = _map_order(detail)
+                items = [_map_item(it, sid, header["salesorder_no"])
+                         for it in (detail.get("items") or [])]
+            except Exception as e:
+                failed += 1
+                log.warning(f"[orders][{run_id}] detail order {sid} gagal: {e}")
+                continue
+
+            buf_headers.append(header)
+            buf_ids.append(sid)
+            buf_items.extend(items)
+            seen_codes.update(i["item_code"] for i in items if i["item_code"])
+            processed += 1
+            if lm and (max_modified is None or lm > max_modified):
+                max_modified = lm
+            if len(buf_headers) >= config.DETAIL_FLUSH:
+                _flush()
+            if processed % 100 == 0:
+                log.info(f"[orders][{run_id}] {processed}/{len(todo)} order tersinkron…")
+        _flush()
+        failed += flush_failed[0]
 
         # update watermark hanya kalau maju
         if max_modified and (wm_dt is None or max_modified > wm_dt):
@@ -226,10 +339,11 @@ def run(lookback_days: int | None = None,
             notifier.notify_unmatched(unmatched)
 
         status = "partial" if failed else "success"
-        log.info(f"[orders][{run_id}] Selesai — {processed} order, {failed} gagal, "
-                 f"{len(unmatched)} SKU tak match.")
+        log.info(f"[orders][{run_id}] Selesai — {processed} detail, {skipped} dilewati "
+                 f"(tak berubah), {failed} gagal, {len(unmatched)} SKU tak match.")
         sb.log_run(run_id, "orders", status, processed, failed, None,
                    {"unmatched_skus": unmatched[:100],
+                    "skipped_unchanged": skipped,
                     "new_watermark": max_modified.isoformat() if max_modified else None})
         notifier.notify_success("orders", processed,
                                 extra=(f"\n⚠️ {len(unmatched)} SKU tak match." if unmatched else ""))
