@@ -33,6 +33,7 @@ def main() -> int:
     ap.add_argument("--stock-only", action="store_true",
                     help="Refresh cepat HPP + stok saja (inventory/v2, tanpa detail katalog)")
     ap.add_argument("--orders", action="store_true", help="Sync penjualan (incremental)")
+    ap.add_argument("--returns", action="store_true", help="Sync retur penjualan (incremental)")
     ap.add_argument("--preorder", action="store_true", help="Sync PO/Inbound stock (belum dipenuhi)")
     ap.add_argument("--report-stock", action="store_true",
                     help="Kirim alert STOK ke WhatsApp (menipis/restock/dead stock)")
@@ -60,7 +61,7 @@ def main() -> int:
         return 0 if ok else 1
 
     if not (args.all or args.products or args.stock_only or args.orders
-            or args.preorder or args.report_stock or args.report_trend):
+            or args.returns or args.preorder or args.report_stock or args.report_trend):
         ap.print_help()
         return 1
 
@@ -77,6 +78,11 @@ def main() -> int:
     if args.all or args.orders:
         from bvr_sync import sync_orders
         res = sync_orders.run(lookback_days=args.lookback_days)
+        rc = rc or (0 if res.get("ok") else 2)
+
+    if args.all or args.returns:
+        from bvr_sync import sync_returns
+        res = sync_returns.run(lookback_days=args.lookback_days)
         rc = rc or (0 if res.get("ok") else 2)
 
     if args.all or args.preorder:
