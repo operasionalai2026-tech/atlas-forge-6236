@@ -37,13 +37,14 @@ export default function Analytics({ email }) {
         setD({});
         return;
       }
-      const [daily, channel, top, low, bulk, dead] = await Promise.all([
+      const [daily, channel, top, low, bulk, dead, retur] = await Promise.all([
         sb.from("v_an_daily_sales").select("*"),
         sb.from("v_an_channel").select("*"),
         sb.from("v_an_top_sku").select("*").limit(10),
         sb.from("v_an_low_stock").select("*"),
         sb.from("v_an_bulk").select("*"),
         sb.from("v_an_dead_stock").select("*"),
+        sb.from("v_an_retur").select("*"),
       ]);
       setD({
         kpi: kpi.data,
@@ -53,6 +54,7 @@ export default function Analytics({ email }) {
         low: low.data || [],
         bulk: bulk.data || [],
         dead: dead.data || [],
+        retur: retur.data || [],
       });
     })();
   }, []);
@@ -91,7 +93,9 @@ export default function Analytics({ email }) {
       )}
 
       {!d ? (
-        <div className="loading" style={{ background: "#fff", borderRadius: 16 }}>Memuat analitik…</div>
+        <div className="loading" style={{ background: "#fff", borderRadius: 16 }}>
+          <span className="spinner" />Memuat analitik…
+        </div>
       ) : (
         <>
           {/* KPI */}
@@ -99,6 +103,8 @@ export default function Analytics({ email }) {
             <div className="stat"><div className="label">Omzet Hari Ini</div><div className="num">{rpShort(d.kpi?.omzet_hari_ini)}</div><div className="stat-ic">💰</div></div>
             <div className="stat pink"><div className="label">Order Hari Ini</div><div className="num">{Number(d.kpi?.order_hari_ini || 0).toLocaleString("id-ID")}</div><div className="stat-ic">🧾</div></div>
             <div className="stat"><div className="label">Omzet 7 Hari</div><div className="num">{rpShort(d.kpi?.omzet_7hari)}</div><div className="stat-ic">📈</div></div>
+            <div className="stat pink"><div className="label">Retur 7 Hari</div><div className="num">{Number(d.kpi?.retur_7hari || 0).toLocaleString("id-ID")}</div><div className="stat-ic">↩️</div></div>
+            <div className="stat"><div className="label">Nilai Retur 7hr</div><div className="num">{rpShort(d.kpi?.nilai_retur_7hari)}</div><div className="stat-ic">💸</div></div>
             <div className="stat pink"><div className="label">SKU Menipis</div><div className="num">{Number(d.kpi?.sku_menipis || 0).toLocaleString("id-ID")}</div><div className="stat-ic">⚠️</div></div>
             <div className="stat"><div className="label">Dead Stock</div><div className="num">{Number(d.kpi?.sku_dead || 0).toLocaleString("id-ID")}</div><div className="stat-ic">🧊</div></div>
           </div>
@@ -150,20 +156,35 @@ export default function Analytics({ email }) {
             )}
           </div>
 
-          <div className="card" style={{ marginTop: 22 }}>
-            <h3>🛒 Barang Diborong (qty ≥ 10 / order, 30 hari)</h3>
-            <TableList
-              rows={d.bulk}
-              empty="Belum ada pembelian borongan"
-              cols={[
-                ["tgl", "Tanggal", (v) => new Date(v).toLocaleDateString("id-ID", { dateStyle: "medium" })],
-                ["channel", "Channel"],
-                ["item_code", "SKU"],
-                ["item_name", "Nama", (v) => <span className="ell">{v}</span>],
-                ["qty", "Qty", (v) => <b className="cnum">{v}</b>],
-                ["customer_name", "Pembeli", (v) => <span className="ell">{v || "—"}</span>],
-              ]}
-            />
+          <div className="grid2" style={{ marginTop: 22 }}>
+            <div className="card">
+              <h3>🛒 Barang Diborong (qty ≥ 3 / order, 30 hari)</h3>
+              <TableList
+                rows={d.bulk}
+                empty="Belum ada pembelian borongan"
+                cols={[
+                  ["tgl", "Tanggal", (v) => new Date(v).toLocaleDateString("id-ID", { dateStyle: "medium" })],
+                  ["channel", "Channel"],
+                  ["item_code", "SKU"],
+                  ["qty", "Qty", (v) => <b className="cnum">{v}</b>],
+                  ["customer_name", "Pembeli", (v) => <span className="ell">{v || "—"}</span>],
+                ]}
+              />
+            </div>
+            <div className="card">
+              <h3>↩️ Tren Retur 30 Hari (nilai)</h3>
+              {mounted && (
+                <ResponsiveContainer width="100%" height={240}>
+                  <BarChart data={d.retur} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#eef2f9" />
+                    <XAxis dataKey="tgl" tickFormatter={tgl} fontSize={11} stroke="#94a3b8" />
+                    <YAxis tickFormatter={rpShort} fontSize={11} stroke="#94a3b8" width={54} />
+                    <Tooltip formatter={(v) => rupiah(v)} labelFormatter={tgl} />
+                    <Bar dataKey="nilai_retur" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
           </div>
 
           {/* PURCHASING */}

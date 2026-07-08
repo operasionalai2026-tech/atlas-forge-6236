@@ -34,6 +34,12 @@ const TABLES = {
     select: "purchaseorder_no,item_code,item_name,qty_po,qty_fulfilled,qty_pending,location_name",
     cols: ["purchaseorder_no","item_code","item_name","qty_po","qty_fulfilled","qty_pending","location_name"],
   },
+  sales_returns: {
+    label: "Retur",
+    select: "doc_number,salesorder_id,customer_name,store_name,grand_total,return_type,transaction_date",
+    cols: ["doc_number","customer_name","store_name","grand_total","return_type","transaction_date"],
+    order: "transaction_date.desc",
+  },
   sync_log: {
     label: "Sync Log",
     select: "run_id,module,status,records_processed,records_failed,started_at,finished_at,error_message",
@@ -56,6 +62,8 @@ const LABELS = {
   qty_pending: "Pending", module: "Modul", records_processed: "Diproses",
   records_failed: "Gagal", started_at: "Mulai", finished_at: "Selesai",
   error_message: "Keterangan", run_id: "Run ID",
+  doc_number: "No Retur", customer_name: "Pembeli", return_type: "Tipe Retur",
+  salesorder_id: "Order ID",
 };
 // kolom bernilai uang → format Rupiah
 const MONEY = new Set(["grand_total", "escrow_amount", "last_cogs", "price", "disc_amount", "amount"]);
@@ -74,9 +82,9 @@ function colLabel(path) {
   return LABELS[k] || k;
 }
 
-const STAT_TABLES = ["orders", "order_items", "products", "product_stocks", "preorder_stocks", "sync_log"];
-const STAT_LABEL = { orders: "Orders", order_items: "Order Items", products: "Products", product_stocks: "Stok Gudang", preorder_stocks: "Preorder", sync_log: "Sync Log" };
-const STAT_ICON = { orders: "🧾", order_items: "📦", products: "🎁", product_stocks: "🏬", preorder_stocks: "🚚", sync_log: "📜" };
+const STAT_TABLES = ["orders", "order_items", "products", "product_stocks", "preorder_stocks", "sales_returns"];
+const STAT_LABEL = { orders: "Orders", order_items: "Order Items", products: "Products", product_stocks: "Stok Gudang", preorder_stocks: "Preorder", sales_returns: "Retur" };
+const STAT_ICON = { orders: "🧾", order_items: "📦", products: "🎁", product_stocks: "🏬", preorder_stocks: "🚚", sales_returns: "↩️" };
 
 function rupiah(n) {
   return "Rp" + Number(n).toLocaleString("id-ID");
@@ -263,7 +271,7 @@ export default function Dashboard({ email }) {
           <div className={"stat" + (i % 2 ? " pink" : "")} key={t}>
             <div className="label">{STAT_LABEL[t]}</div>
             <div className="num">
-              {stats[t] == null ? "…" : Number(stats[t]).toLocaleString("id-ID")}
+              {stats[t] == null ? <span className="skel" /> : Number(stats[t]).toLocaleString("id-ID")}
             </div>
             <div className="stat-ic">{STAT_ICON[t]}</div>
           </div>
